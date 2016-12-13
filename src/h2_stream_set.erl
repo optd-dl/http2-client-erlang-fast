@@ -154,6 +154,7 @@
    [
     close/3,
     send_what_we_can/4,
+	send_what_we_can_and_headers/8,
     update_all_recv_windows/2,
     update_all_send_windows/2,
     update_their_max_active/2,
@@ -635,6 +636,18 @@ send_what_we_can(StreamId, ConnSendWindowSize, MaxFrameSize, Streams) ->
     {NewConnSendWindowSize,
      upsert(NewStream, Streams)}.
 
+send_what_we_can_and_headers(StreamId, ConnSendWindowSize, MaxFrameSize, Streams, Headers, HeadersBinList, Socket, WindowSize) ->
+	lager:debug("send_what_we_can_and_headers, ~p, ~p, ~p, ~p, ~p, ~p, ~p, ~p",
+                [StreamId, ConnSendWindowSize, MaxFrameSize, Streams, Headers, HeadersBinList, Socket, WindowSize]),
+    {NewConnSendWindowSize, NewStream} =
+        s_send_what_we_can_and_headers(ConnSendWindowSize,
+                           MaxFrameSize,
+                           get(StreamId, Streams),
+						   Headers, 
+						   HeadersBinList, Socket, WindowSize),
+    {NewConnSendWindowSize,
+     upsert(NewStream, Streams)}.
+
 %% Send at the connection level
 -spec c_send_what_we_can(ConnSendWindowSize :: integer(),
                          MaxFrameSize :: non_neg_integer(),
@@ -747,6 +760,74 @@ s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
 s_send_what_we_can(SWS, _MFS, NonActiveStream) ->
     {SWS, NonActiveStream}.
 
+s_send_what_we_can_and_headers(SWS, MFS, #active_stream{}=Stream, Headers, HeadersBinList, Socket, WindowSize) ->
+	lager:debug("s_send_what_we_can_and_headers, ~p, ~p, ~p, ~p, ~p, ~p, ~p",
+                [SWS, MFS, Stream, Headers, HeadersBinList, Socket, WindowSize]),
+    SSWS = Stream#active_stream.send_window_size,
+
+    QueueSize = byte_size(Stream#active_stream.queued_data),
+
+    {MaxToSend, ExitStrategy} =
+        case {MFS =< SWS andalso MFS =< SSWS, SWS < SSWS} of
+            %% If MAX_FRAME_SIZE is the smallest, send one and recurse
+            {true, _} ->
+                {MFS, max_frame_size};
+            {false, true} ->
+                {SWS, connection};
+            _ ->
+                {SSWS, stream}
+        end,
+
+    {Frame, SentBytes, NewS} =
+        case MaxToSend > QueueSize of
+            true ->
+                Flags = case Stream#active_stream.body_complete of
+                         true -> ?FLAG_END_STREAM;
+                         false -> 0
+                        end,
+                %% We have the power to send everything
+                {{#frame_header{
+                     stream_id=Stream#active_stream.id,
+                     flags=Flags,
+                     type=?DATA,
+                     length=QueueSize
+                    },
+                  h2_frame_data:new(Stream#active_stream.queued_data)},  %% Full Body
+                 QueueSize,
+                 Stream#active_stream{
+                   queued_data=done,
+                   send_window_size=SSWS-QueueSize}};
+            false ->
+                <<BinToSend:MaxToSend/binary,Rest/binary>> = Stream#active_stream.queued_data,
+                {{#frame_header{
+                     stream_id=Stream#active_stream.id,
+                     type=?DATA,
+                     length=MaxToSend
+                    },
+                  h2_frame_data:new(BinToSend)},
+                 MaxToSend,
+                 Stream#active_stream{
+                   queued_data=Rest,
+                   send_window_size=SSWS-MaxToSend}}
+        end,
+	case Stream#active_stream.id of
+		1 ->
+			sock:send(Socket, HeadersBinList ++ h2_frame:to_binary(Frame));
+		N ->
+			StreamId = N - 2,
+			sock:send(Socket, [<<4:24,8:8,0:8,StreamId:32,WindowSize:32>>, <<4:24,8:8,0:8,0:32,WindowSize:32>>] ++ HeadersBinList ++ h2_frame:to_binary(Frame))
+	end,
+	h2_connection:send_h(Stream, Headers),
+	_Sent = h2_stream:send_data_sm(Stream#active_stream.pid, Frame),
+
+    case ExitStrategy of
+        max_frame_size ->
+            s_send_what_we_can(SWS - SentBytes, MFS, NewS);
+        stream ->
+            {SWS - SentBytes, NewS};
+        connection ->
+            {0, NewS}
+    end.
 
 %% Record Accessors
 -spec stream_id(

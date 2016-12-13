@@ -55,10 +55,14 @@ read_binary(_, #frame_header{}=H) ->
            non_neg_integer(),
            stream_id()) ->
                   ok.
-send(Socket, WindowSizeIncrement, StreamId) ->
-    sock:send(Socket, [
-                       <<4:24,?WINDOW_UPDATE:8,0:8,0:1,StreamId:31>>,
-                       <<0:1,WindowSizeIncrement:31>>]).
+
+send(_Socket, _WindowSizeIncrement, _StreamId) ->
+	ok.
+%send(Socket, WindowSizeIncrement, StreamId) ->
+%    sock:send(Socket, [
+%                       <<4:24,?WINDOW_UPDATE:8,0:8,0:1,StreamId:31>>,
+%                       <<0:1,WindowSizeIncrement:31>>]).
+%                       <<0:1,1:31>>]).
 
 
 -spec size_increment(payload()) -> non_neg_integer().

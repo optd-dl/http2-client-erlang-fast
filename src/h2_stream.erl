@@ -6,6 +6,7 @@
          start_link/4,
          send_pp/2,
          send_data/2,
+		 send_data_sm/2,
          stream_id/0,
          connection/0,
          send_window_update/1,
@@ -118,6 +119,9 @@ send_pp(Pid, Headers) ->
                         ok | flow_control.
 send_data(Pid, Frame) ->
     gen_fsm:send_event(Pid, {send_data, Frame}).
+
+send_data_sm(Pid, Frame) ->
+    gen_fsm:send_event(Pid, {send_data_sm, Frame}).
 
 -spec stream_id() -> stream_id().
 stream_id() ->
@@ -363,6 +367,24 @@ open({send_data,
                 open
         end,
     {next_state, NextState, Stream};
+
+open({send_data_sm,
+      {#frame_header{
+          type=?DATA,
+          flags=Flags
+         }, _}},
+     #stream_state{}=Stream) ->
+		lager:debug("open state send_data_sm, ~p",[Stream]),
+
+    NextState =
+        case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
+            true ->
+                half_closed_local;
+            _ ->
+                open
+        end,
+    {next_state, NextState, Stream};
+
 open(
   {send_h, Headers},
   #stream_state{}=Stream) ->

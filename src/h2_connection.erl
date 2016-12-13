@@ -14,6 +14,7 @@
 
 %% HTTP Operations
 -export([
+		 send_data/4,
          send_headers/3,
          send_headers/4,
          send_body/3,
@@ -89,7 +90,8 @@
           stream_callback_mod = application:get_env(chatterbox, stream_callback_mod, chatterbox_static_stream) :: module(),
           buffer = empty :: empty | {binary, binary()} | {frame, h2_frame:header(), binary()},
           continuation = undefined :: undefined | #continuation_state{},
-          flow_control = auto :: auto | manual
+          flow_control = auto :: auto | manual,
+          next_send_window_size = 0 :: integer()
 }).
 
 -type connection() :: #connection{}.
@@ -218,6 +220,11 @@ send_frame(Pid, Bin)
 send_frame(Pid, Frame) ->
     gen_fsm:send_all_state_event(Pid, {send_frame, Frame}).
 
+-spec send_data(pid(), stream_id(), hpack:headers(), binary()) -> ok.
+send_data(Pid, StreamId, Headers, Body) ->
+	gen_fsm:send_all_state_event(Pid, {send_data, StreamId, Headers, Body, []}),
+	ok.
+	
 -spec send_headers(pid(), stream_id(), hpack:headers()) -> ok.
 send_headers(Pid, StreamId, Headers) ->
     gen_fsm:send_all_state_event(Pid, {send_headers, StreamId, Headers, []}),
@@ -893,14 +900,79 @@ handle_event({send_window_update, Size},
              StateName,
              #connection{
                 recv_window_size=CRWS,
-                socket=Socket
+                socket=Socket,
+				next_send_window_size=OldSize
                 }=Conn) ->
     ok = h2_frame_window_update:send(Socket, Size, 0),
     {next_state,
      StateName,
      Conn#connection{
-       recv_window_size=CRWS+Size
+       recv_window_size=CRWS+Size,
+       next_send_window_size=OldSize+Size
       }};
+
+handle_event({send_data, StreamId, Headers, Body, Opts},
+             StateName,
+             #connection{
+                encode_context=EncodeContext,
+                streams = Streams,
+                socket = Socket,
+				next_send_window_size=WindowSize
+               }=Conn
+            ) ->
+    lager:debug("[~p] {send_data, ~p, ~p, ~p, ~p}",
+                [Conn#connection.type, StreamId, Headers, Body, Opts]),
+    BodyComplete = proplists:get_value(send_end_stream, Opts, true),
+	lager:debug("BodyComplete: ~p}", [BodyComplete]),
+    Stream = h2_stream_set:get(StreamId, Streams),
+	lager:debug("Stream=~p; Streams=~p",[Stream, Streams]),
+    case h2_stream_set:type(Stream) of
+        active ->
+			lager:debug("active"),
+            {FramesToSend, NewContext} =
+                h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
+                                           Headers,
+                                           EncodeContext,
+                                            (Conn#connection.peer_settings)#settings.max_frame_size,
+                                           false%StreamComplete
+                                          ),
+			lager:debug("FramesToSend=~p; NewContext=~p; EncodeContext=~p",[FramesToSend, NewContext, EncodeContext]),
+			HeadersBinList = [h2_frame:to_binary(Frame) || Frame <- FramesToSend],
+			lager:debug("HeadersBinList=~p",[HeadersBinList]),
+
+            OldBody = h2_stream_set:queued_data(Stream),
+            NewBody = case is_binary(OldBody) of
+                          true -> <<OldBody/binary, Body/binary>>;
+                          false -> Body
+                      end,
+            {NewSWS, NewStreams} =
+                h2_stream_set:send_what_we_can_and_headers(
+                  StreamId,
+                  Conn#connection.send_window_size,
+                  (Conn#connection.peer_settings)#settings.max_frame_size,
+                  h2_stream_set:upsert(
+                    h2_stream_set:update_data_queue(NewBody, BodyComplete, Stream),
+                    Conn#connection.streams),
+				  Headers, HeadersBinList, Socket, WindowSize),
+
+            {next_state, StateName,
+             Conn#connection{
+               encode_context=NewContext,
+			   send_window_size=NewSWS,
+			   streams=NewStreams,
+			   next_send_window_size=0
+              }};
+        idle ->
+			lager:debug("idle"),
+            %% In theory this is a client maybe activating a stream,
+            %% but in practice, we've already activated the stream in
+            %% new_stream/1
+            {next_state, StateName, Conn};
+        closed ->
+			lager:debug("closed"),
+            {next_state, StateName, Conn}
+    end;
+
 handle_event({send_headers, StreamId, Headers, Opts},
              StateName,
              #connection{
