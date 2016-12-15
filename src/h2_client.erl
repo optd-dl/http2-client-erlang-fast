@@ -22,7 +22,9 @@
          start_ssl_upgrade_link/4,
          stop/1,
          send_request/3,
+         send_request_combine/3,
          sync_request/3,
+         sync_request_combine/3,
          get_response/2
         ]).
 
@@ -124,10 +126,23 @@ sync_request(CliPid, Headers, Body) ->
     after 5000 ->
         {error, timeout}
     end.
+sync_request_combine(CliPid, Headers, Body) ->
+    StreamId = h2_connection:new_stream(CliPid),
+    h2_connection:send_data(CliPid, StreamId, Headers, Body),
+    receive
+        {'END_STREAM', StreamId} ->
+            h2_connection:get_response(CliPid, StreamId)
+    after 5000 ->
+        {error, timeout}
+    end.
 send_request(CliPid, Headers, Body) ->
     StreamId = h2_connection:new_stream(CliPid),
     h2_connection:send_headers(CliPid, StreamId, Headers),
     h2_connection:send_body(CliPid,StreamId,Body),
+    {ok, StreamId}.
+send_request_combine(CliPid, Headers, Body) ->
+    StreamId = h2_connection:new_stream(CliPid),
+    h2_connection:send_data(CliPid, StreamId, Headers, Body),
     {ok, StreamId}.
 
 -spec get_response(pid(), stream_id()) ->

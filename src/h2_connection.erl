@@ -14,7 +14,8 @@
 
 %% HTTP Operations
 -export([
-		 send_data/4,
+         send_data/4,
+         send_h/2,	
          send_headers/3,
          send_headers/4,
          send_body/3,
