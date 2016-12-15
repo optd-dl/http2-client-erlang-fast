@@ -33,6 +33,30 @@ e.g.
 ###Contact us:
 * [gaoliang@rongcapital.cn](mailto:gaoliang@rongcapital.cn)
 
+##HowTo
+-------------------
+***Refer to:***  
+[src/howto.erl](https://github.com/optd-dl/http2-client-erlang-fast/blob/master/src/howto.erl "howto.erl")  
+***e.g.***
+```erlang
+    %% connect
+	{ok, Pid} = h2_client:start_link(http, "localhost", 50051),
+    %% header
+	RequestHeaders = [
+					  {<<":method">>, <<"POST">>},
+					  {<<":scheme">>, <<"http">>},
+					  {<<":path">>, <<"/helloworld.Greeter/SayHello">>},
+					  {<<":authority">>, <<"localhost">>},
+					  {<<"content-type">>, <<"application/grpc">>},
+					  {<<"user-agent">>, <<"chatterbox-client/0.0.1">>},
+					  {<<"te">>, <<"trailers">>}
+					 ],
+	%% body -- "world"
+	RequestBody = <<0:8, 7:32, <<16#0a,16#05,16#77,16#6f,16#72,16#6c,16#64>>/binary>>,
+	%% send and receive
+	{ok, {ResponseHeaders, ResponseBody}} = h2_client:sync_request_combine(Pid, RequestHeaders, RequestBody).
+```
+
 ##Build
 -------------------
 $ ./rebar get-deps  
@@ -42,10 +66,14 @@ $ ./rebar compile
 ------------
 ***e.g.***
 ###Run Server -- Precondition -- Java
-```bash
+$ ./start-server.sh
 
-```
 ###Run Client -- Erlang
+$ ./rebar shell
 ```erlang
-
+howto:call().
 ```
+
+##Dependencies
+-------------------
+
