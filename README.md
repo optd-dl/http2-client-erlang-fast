@@ -66,7 +66,9 @@ $ ./rebar compile
 ------------
 ***e.g.***
 ###Run Server -- Precondition -- Java
-$ ./start-server.sh
+$ ./start-server.sh  
+#####Notice
+***The first running will take a long time, because need to download gradle and jars.***
 
 ###Run Client -- Erlang
 $ ./rebar shell
@@ -76,4 +78,11 @@ howto:call().
 
 ##Dependencies
 -------------------
+***The following is the environment of author, may not be mandatory dependencies.***  
+
+* Linux -- CentOS-7-x86_64-Everything-1503-01
+* Erlang -- otp 18.1
+* Java -- jdk-8u111-linux-x64
+* Gradle -- gradle-2.13 (audo download in [start-server.sh](https://github.com/optd-dl/http2-client-erlang-fast/blob/master/start-server.sh "howto.erl"))
+* Git -- git x86_64 1.8.3.1
 
