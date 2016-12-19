@@ -18,6 +18,7 @@ e.g.
 
 ###Base protocol:
 * [Hypertext Transfer Protocol Version 2 (HTTP/2)](https://tools.ietf.org/html/rfc7540 "http/2")
+* [HPACK: Header Compression for HTTP/2](https://tools.ietf.org/html/rfc7541 "HPACK")
 
 ###Base source code:
 * [chatterbox](https://github.com/joedevivo/chatterbox "chatterbox")
